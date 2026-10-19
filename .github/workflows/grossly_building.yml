@@ -7,7 +7,7 @@ jobs:
   create-tag:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.calculate-version.outputs.version-string }}
+      version-string: ${{ steps.calculate-version.outputs.version-string }}
     permissions:
       contents: write
 
@@ -19,7 +19,6 @@ jobs:
           fetch-tags: true
 
       - name: configuring version tag
-        id: calculate-version
         uses: bitshifted/git-auto-semver@v2
         with:
           create_tag: true
@@ -27,6 +26,7 @@ jobs:
           initial_version: 1.0.0
 
       - name: checking/saving tag creation
+        id: calculate-version
         env:
             GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -48,7 +48,7 @@ jobs:
       - name: creating release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.create-tag.outputs.version }}
+          VERSION: ${{ needs.create-tag.outputs.version-string }}
         run: |
           gh release create "v$VERSION"
 
