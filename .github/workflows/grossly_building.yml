@@ -4,82 +4,100 @@ on:
   pull_request:
 
 jobs:
-    verify-build:
-        runs-on: windows-latest
-        permissions:
-            contents: write
+  create-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
-        steps:
-            - name: checkout current repo
-              uses: actions/checkout@v7
-              with:
-                  fetch-depth: 0
-                  fetch-tags: true
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-            - name: initial configuration
-              run: |
-                pip install scons
+      - name: configuring version tag
+        id: calculate-version
+        uses: bitshifted/git-auto-semver@v2
+        with:
+          create_tag: true
+          tag-prefix: 'v'
+          initial-version: 1.0.0
 
-            - name: set NugetSource
-              run: |
-                $target_dir = Join-Path $env:LOCALAPPDATA "LocalNugetSource"
-                New-Item -ItemType Directory -Force -Path $target_dir
+      - name: checking tag creation
+        run: |
+          gh api repos/:owner/:repo/tags --jq '.[0].name'
+          echo ${{ steps.calculate-version.outputs.version-string }}
 
-                dotnet nuget add source $target_dir --name LocalNugetSource
+  verify-build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
 
-            - name: setting up cache
-              uses: mozilla-actions/sccache-action@v0.0.11
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-            - name: build editor binaries
-              env:
-                SCCACHE_GHA_ENABLED: "true"
-              run: |
-                python misc\scripts\install_accesskit.py
-                python misc\scripts\install_d3d12_sdk_windows.py
-                scons platform=windows target=editor module_mono_enabled=yes use_llvm=yes
+      - name: initial configuration
+        run: |
+          pip install scons
 
-            - name: build export templates
-              env:
-                SCCACHE_GHA_ENABLED: "true"
-              run: |
-                scons platform=windows target=template_debug module_mono_enabled=yes
-                scons platform=windows target=template_release module_mono_enabled=yes
+      - name: set NugetSource
+        run: |
+          $target_dir = Join-Path $env:LOCALAPPDATA "LocalNugetSource"
+          New-Item -ItemType Directory -Force -Path $target_dir
 
-            - name: generate glue
-              run: |
-                bin/godot.windows.editor.x86_64.llvm.mono --headless --generate-mono-glue modules/mono/glue
+          dotnet nuget add source $target_dir --name LocalNugetSource
 
-            - name: building .NET assemblies
-              env:
-                SCCACHE_GHA_ENABLED: "true"
-              run: |
-                $target_dir = Join-Path $env:LOCALAPPDATA "LocalNugetSource"
-                python ./modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=windows --push-nupkgs-local $target_dir
+      - name: setting up cache
+        uses: mozilla-actions/sccache-action@v0.0.11
 
-            - name: configuring release zip
-              shell: powershell
-              run: |
-                $source_path = Join-Path $env:LOCALAPPDATA "LocalNugetSource"
-                $target_path = Join-Path $env:GITHUB_WORKSPACE "Release"
-                $zip_path = Join-Path $env:GITHUB_WORKSPACE "Grossly-Godot-Release.zip"
+      - name: build editor binaries
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          python misc\scripts\install_accesskit.py
+          python misc\scripts\install_d3d12_sdk_windows.py
+          scons platform=windows target=editor module_mono_enabled=yes use_llvm=yes
 
-                New-Item -ItemType Directory -Force -Path $target_path | Out-Null
+      - name: build export templates
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          scons platform=windows target=template_debug module_mono_enabled=yes
+          scons platform=windows target=template_release module_mono_enabled=yes
 
-                Copy-Item -Path (Join-Path $source_path "*.snupkg")  -Destination $target_path -Force
-                Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "bin/*.exe") -Exclude (Join-Path $env:GITHUB_WORKSPACE "bin/*.console.exe") -Destination $target_path -Force
-                Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "bin/GodotSharp") -Destination $target_path -Recurse -Force
+      - name: generate glue
+        run: |
+          bin/godot.windows.editor.x86_64.llvm.mono --headless --generate-mono-glue modules/mono/glue
 
-                Compress-Archive -Path (Join-Path $target_path "*") -DestinationPath $zip_path -Force
+      - name: building .NET assemblies
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          $target_dir = Join-Path $env:LOCALAPPDATA "LocalNugetSource"
+          python ./modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=windows --push-nupkgs-local $target_dir
 
-            - name: configuring version tag
-              id: calculate-version
-              uses: bitshifted/git-auto-semver@v2
-              with:
-                create_tag: true
-                initial-version: 1.0.0
+      - name: configuring release zip
+        shell: powershell
+        run: |
+          $source_path = Join-Path $env:LOCALAPPDATA "LocalNugetSource"
+          $target_path = Join-Path $env:GITHUB_WORKSPACE "Release"
+          $zip_path = Join-Path $env:GITHUB_WORKSPACE "Grossly-Godot-Release.zip"
 
-            - name: creating release
-              env:
-                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                gh release create "v${{ steps.calculate-version.outputs.version-string }}" "$env:GITHUB_WORKSPACE\Grossly-Godot-Release.zip"
+          New-Item -ItemType Directory -Force -Path $target_path | Out-Null
+
+          Copy-Item -Path (Join-Path $source_path "*.snupkg")  -Destination $target_path -Force
+          Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "bin/*.exe") -Exclude (Join-Path $env:GITHUB_WORKSPACE "bin/*.console.exe") -Destination $target_path -Force
+          Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "bin/GodotSharp") -Destination $target_path -Recurse -Force
+
+          Compress-Archive -Path (Join-Path $target_path "*") -DestinationPath $zip_path -Force
+
+      - name: creating release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create --use-latest-tag "$env:GITHUB_WORKSPACE\Grossly-Godot-Release.zip"
