@@ -1,7 +1,7 @@
 name: ✦ Semantic Versioning Testing for Grossly Godot ✦
 
 on:
-  push:
+  pull_request:
 
 jobs:
     verify-build:
@@ -12,6 +12,9 @@ jobs:
         steps:
             - name: checkout current repo
               uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  fetch-tags: true
 
             - name: initial configuration
               run: |
@@ -68,8 +71,15 @@ jobs:
 
                 Compress-Archive -Path (Join-Path $target_path "*") -DestinationPath $zip_path -Force
 
+            - name: configuring version tag
+              id: calculate-version
+              uses: bitshifted/git-auto-semver@v2
+              with:
+                create_tag: true
+                initial-version: 1.0.0
+
             - name: creating release
               env:
                 GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                gh release create "grossly-godot-${{ github.run_number}}" "$env:GITHUB_WORKSPACE\Grossly-Godot-Release.zip"
+                gh release create "v${{ steps.calculate-version.outputs.version-string }}" "$env:GITHUB_WORKSPACE\Grossly-Godot-Release.zip"
